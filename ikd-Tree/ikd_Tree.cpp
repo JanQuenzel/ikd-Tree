@@ -1,4 +1,5 @@
 #include "ikd_Tree.h"
+#include "point_type.h"
 
 /*
 Description: ikd-Tree: an incremental k-d tree for robotic applications 
@@ -73,7 +74,7 @@ void KD_TREE<PointType>::InitTreeNode(KD_TREE_NODE * root){
     root->point_downsample_deleted = false;
     root->working_flag = false;
     pthread_mutex_init(&(root->push_down_mutex_lock),NULL);
-}   
+}
 
 template <typename PointType>
 int KD_TREE<PointType>::size(){
@@ -410,6 +411,9 @@ void KD_TREE<PointType>::Radius_Search(PointType point, const float radius, Poin
     Search_by_radius(Root_Node, point, radius, Storage);
 }
 
+template<typename T>
+constexpr bool has_intensity_v = false;
+
 template <typename PointType>
 int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on){
     int NewPointSize = PointToAdd.size();
@@ -419,6 +423,7 @@ int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on)
     bool downsample_switch = downsample_on && DOWNSAMPLE_SWITCH;
     float min_dist, tmp_dist;
     int tmp_counter = 0;
+    float mean_intens = 0; float mean_intens_num = 0;
     for (int i=0; i<PointToAdd.size();i++){
         if (downsample_switch){
             Box_of_Point.vertex_min[0] = floor(PointToAdd[i].x/downsample_size)*downsample_size;
@@ -433,15 +438,29 @@ int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on)
             PointVector ().swap(Downsample_Storage);
             Search_by_range(Root_Node, Box_of_Point, Downsample_Storage);
             min_dist = calc_dist(PointToAdd[i],mid_point);
-            downsample_result = PointToAdd[i];                
+            downsample_result = PointToAdd[i];
+            mean_intens = 0; mean_intens_num = 0;
             for (int index = 0; index < Downsample_Storage.size(); index++){
                 tmp_dist = calc_dist(Downsample_Storage[index], mid_point);
                 if (tmp_dist < min_dist){
                     min_dist = tmp_dist;
                     downsample_result = Downsample_Storage[index];
                 }
+                if constexpr ( has_intensity_v<PointType> )
+                if ( Downsample_Storage[index].intensity > min_reflectance )
+                {
+                    mean_intens += Downsample_Storage[index].intensity * std::max(1.f,Downsample_Storage[index].intensity_count);
+                    mean_intens_num += std::max(1.f,Downsample_Storage[index].intensity_count);
+                }
             }
-            if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node){  
+            if constexpr ( has_intensity_v<PointType> )
+            if ( Downsample_Storage.size() > 1 && mean_intens_num > 1.9f )
+            {
+                downsample_result.intensity = mean_intens / mean_intens_num;
+                downsample_result.intensity_count = mean_intens_num;
+                //std::cout << "hello: " << i << " i: " <<downsample_result.intensity << " n: " << mean_intens_num << " ds: " << Downsample_Storage.size() << std::endl;
+            }
+            if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node){
                 if (Downsample_Storage.size() > 1 || same_point(PointToAdd[i], downsample_result)){
                     if (Downsample_Storage.size() > 0) Delete_by_range(&Root_Node, Box_of_Point, true, true);
                     Add_by_point(&Root_Node, downsample_result, true, Root_Node->division_axis);
@@ -1447,3 +1466,8 @@ template class KD_TREE<ikdTree_PointType>;
 template class KD_TREE<pcl::PointXYZ>;
 template class KD_TREE<pcl::PointXYZI>;
 template class KD_TREE<pcl::PointXYZINormal>;
+
+
+template class KD_TREE<PointType>;
+template<>
+constexpr bool has_intensity_v<PointType> = true;
