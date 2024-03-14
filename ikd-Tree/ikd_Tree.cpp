@@ -423,7 +423,8 @@ int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on)
     bool downsample_switch = downsample_on && DOWNSAMPLE_SWITCH;
     float min_dist, tmp_dist;
     int tmp_counter = 0;
-    float mean_intens = 0; float mean_intens_num = 0;
+    constexpr bool print_info = false;
+    float mean_intens = 0; float mean_intens_num = 0; int num_intens_valids = 0;
     for (int i=0; i<PointToAdd.size();i++){
         if (downsample_switch){
             Box_of_Point.vertex_min[0] = floor(PointToAdd[i].x/downsample_size)*downsample_size;
@@ -439,7 +440,19 @@ int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on)
             Search_by_range(Root_Node, Box_of_Point, Downsample_Storage);
             min_dist = calc_dist(PointToAdd[i],mid_point);
             downsample_result = PointToAdd[i];
-            mean_intens = 0; mean_intens_num = 0;
+            mean_intens = 0; mean_intens_num = 0; num_intens_valids = 0;
+            if constexpr ( has_intensity_v<PointType> )
+            if ( PointToAdd[i].intensity > min_reflectance )
+            {
+                mean_intens += PointToAdd[i].intensity * std::max(1.f,PointToAdd[i].intensity_count);
+                mean_intens_num += std::max(1.f,PointToAdd[i].intensity_count);
+                ++num_intens_valids;
+                if constexpr ( print_info )
+                if ( (i & 511) == 0 )
+                std::cout << "pa-i: " << i << " i: " << PointToAdd[i].intensity << " n: " << PointToAdd[i].intensity_count
+                          << " o: " << mid_point.x << " " << mid_point.y << " " << mid_point.z
+                          << " ds: " << Downsample_Storage.size() << std::endl;
+            }
             for (int index = 0; index < Downsample_Storage.size(); index++){
                 tmp_dist = calc_dist(Downsample_Storage[index], mid_point);
                 if (tmp_dist < min_dist){
@@ -451,15 +464,51 @@ int KD_TREE<PointType>::Add_Points(PointVector & PointToAdd, bool downsample_on)
                 {
                     mean_intens += Downsample_Storage[index].intensity * std::max(1.f,Downsample_Storage[index].intensity_count);
                     mean_intens_num += std::max(1.f,Downsample_Storage[index].intensity_count);
+                    ++num_intens_valids;
+
+                    if constexpr ( print_info )
+                    if ( (i & 511) == 0 )
+                    std::cout << "ds-i: " << i << " " << index << " i: " << Downsample_Storage[index].intensity << " n: " << Downsample_Storage[index].intensity_count << " ( " << num_intens_valids << " ) "
+                              << " o: " << mid_point.x << " " << mid_point.y << " " << mid_point.z << " mr: " << min_reflectance
+                              << " ds: " << Downsample_Storage.size() << std::endl;
                 }
             }
+
             if constexpr ( has_intensity_v<PointType> )
-            if ( Downsample_Storage.size() > 1 && mean_intens_num > 1.9f )
+            if ( num_intens_valids > 0 ) // at least one more point
             {
                 downsample_result.intensity = mean_intens / mean_intens_num;
                 downsample_result.intensity_count = mean_intens_num;
-                //std::cout << "hello: " << i << " i: " <<downsample_result.intensity << " n: " << mean_intens_num << " ds: " << Downsample_Storage.size() << std::endl;
+
+                if constexpr ( print_info )
+                if ( (i & 511) == 0 )
+                std::cout << "hello: " << i << " i: " <<downsample_result.intensity << " n: " << mean_intens_num << " ( " << num_intens_valids << " ) "
+                          << " o: " << mid_point.x << " " << mid_point.y << " " << mid_point.z
+                          << " ds: " << Downsample_Storage.size() << std::endl;
+
+                if ( downsample_result.intensity < min_reflectance )
+                    std::cerr << "why ? " << i << " i: " << downsample_result.intensity << " s: " << mean_intens << " n: " << mean_intens_num << std::endl;
             }
+
+
+            if constexpr ( has_intensity_v<PointType> )
+            {
+                if ( num_intens_valids > 0 && downsample_result.intensity_count == 0 ) // at least one more point
+                {
+                    std::cerr << "e_ds: " << i << " i: " << downsample_result.intensity << " n: " << downsample_result.intensity_count << std::endl;
+                    throw std::runtime_error("nope!");
+                }
+            }
+
+//            if constexpr ( has_intensity_v<PointType> )
+//            {
+//                if ( //downsample_result.intensity_count == 0 ||
+//                     downsample_result.intensity < min_reflectance )
+//                    std::cerr << "e_ds: " << i << " i: " << downsample_result.intensity << " n: " << downsample_result.intensity_count << std::endl;
+//                else{ if constexpr ( print_info ) if ( (i & 511) == 0 )
+//                    std::cout << "_ds: " << i << " i: " << downsample_result.intensity << " n: " << downsample_result.intensity_count << std::endl;
+//                }
+//            }
             if (Rebuild_Ptr == nullptr || *Rebuild_Ptr != Root_Node){
                 if (Downsample_Storage.size() > 1 || same_point(PointToAdd[i], downsample_result)){
                     if (Downsample_Storage.size() > 0) Delete_by_range(&Root_Node, Box_of_Point, true, true);
@@ -1462,10 +1511,10 @@ int MANUAL_Q<T>::size(){
     return counter;
 }
 
-template class KD_TREE<ikdTree_PointType>;
-template class KD_TREE<pcl::PointXYZ>;
-template class KD_TREE<pcl::PointXYZI>;
-template class KD_TREE<pcl::PointXYZINormal>;
+//template class KD_TREE<ikdTree_PointType>;
+//template class KD_TREE<pcl::PointXYZ>;
+//template class KD_TREE<pcl::PointXYZI>;
+//template class KD_TREE<pcl::PointXYZINormal>;
 
 
 template class KD_TREE<PointType>;
